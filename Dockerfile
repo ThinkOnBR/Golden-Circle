@@ -1,22 +1,23 @@
-FROM node:20-alpine
+FROM node:20
 
-# Definir diretório de trabalho
+# Define o diretório de trabalho
 WORKDIR /app
 
-# Copiar arquivos de dependência
-COPY package.json ./
+# Copia os arquivos de definição de dependências
+COPY package*.json ./
 
-# Instalar todas as dependências (incluindo as de desenvolvimento para o build)
-RUN npm install
+# Instala as dependências ignorando conflitos de versão (flag --legacy-peer-deps)
+# Isso resolve o erro "command failed with exit code 1" no npm install
+RUN npm install --legacy-peer-deps
 
-# Copiar todo o código fonte
+# Copia o restante do código fonte
 COPY . .
 
-# Construir o projeto (Gera a pasta 'dist')
+# Executa o build do Vite (gera a pasta dist)
 RUN npm run build
 
-# Expor a porta que o server.js usa
+# Expõe a porta que o server.js utiliza
 EXPOSE 8080
 
-# Iniciar o servidor Express
+# Inicia o servidor
 CMD ["node", "server.js"]
