@@ -1,23 +1,24 @@
-FROM node:20
+# Usa uma imagem leve do Node.js 20 baseada em Alpine Linux
+FROM node:20-alpine
 
-# Define o diretório de trabalho
+# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
 # Copia os arquivos de definição de dependências
 COPY package*.json ./
 
-# Instala as dependências ignorando conflitos de versão (flag --legacy-peer-deps)
-# Isso resolve o erro "command failed with exit code 1" no npm install
+# Instala todas as dependências do projeto
+# Adicionamos --legacy-peer-deps para evitar conflitos de versão se houver
 RUN npm install --legacy-peer-deps
 
-# Copia o restante do código fonte
+# Copia todo o restante do código fonte para o container
 COPY . .
 
-# Executa o build do Vite (gera a pasta dist)
+# Executa o comando de build do Vite (gera a pasta 'dist')
 RUN npm run build
 
-# Expõe a porta que o server.js utiliza
+# Expõe a porta 8080 (usada pelo server.js)
 EXPOSE 8080
 
-# Inicia o servidor
-CMD ["node", "server.js"]
+# Comando para iniciar a aplicação (roda 'node server.js' conforme seu package.json)
+CMD ["npm", "start"]
