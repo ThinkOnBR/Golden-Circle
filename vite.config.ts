@@ -15,7 +15,8 @@ export default defineConfig(({ mode }) => {
       port: 3000,
     },
     build: {
-      outDir: 'dist',
+      // MUDANÇA CRÍTICA: Usando 'build' em vez de 'dist' para evitar colisão com volumes do Cloud Run
+      outDir: 'build',
       assetsDir: 'assets',
       sourcemap: false,
     }
