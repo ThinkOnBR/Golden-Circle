@@ -1,22 +1,24 @@
-# Exemplo de estrutura correta:
+# Usa uma imagem leve do Node.js 20 baseada em Alpine Linux
 FROM node:20-alpine
 
+# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# 1. Instala dependências
+# Copia os arquivos de definição de dependências
 COPY package*.json ./
-RUN npm install
 
-# 2. Copia o código fonte
+# Instala todas as dependências do projeto
+# Adicionamos --legacy-peer-deps para evitar conflitos de versão se houver
+RUN npm install --legacy-peer-deps
+
+# Copia todo o restante do código fonte para o container
 COPY . .
 
-# 3. CRÍTICO: Gera o build de produção (cria a pasta 'dist')
-# Sem isso, o server.js falha e derruba o container.
+# Executa o comando de build do Vite (gera a pasta 'dist')
 RUN npm run build
 
-# 4. Garante que a porta 8080 (padrão do Cloud Run) esteja exposta
+# Expõe a porta 8080 (usada pelo server.js)
 EXPOSE 8080
-ENV PORT=8080
 
-# 5. Inicia o servidor
-CMD ["node", "server.js"]
+# Comando para iniciar a aplicação (roda 'node server.js' conforme seu package.json)
+CMD ["npm", "start"]
