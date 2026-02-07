@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ToastProvider } from './components/Toast'; // Importação nova
 import { Layout } from './components/Layout';
 
 // Pages
@@ -26,12 +27,6 @@ const AppRoutes: React.FC = () => {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
       
-      {/* 
-         CORREÇÃO CRÍTICA:
-         O ProtectedRoute agora envolve o Layout inteiro.
-         Isso impede que o Layout tente renderizar sem usuário (o que causava a tela preta)
-         e força o redirecionamento para o Login imediatamente.
-      */}
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/challenges" element={<Challenges />} />
@@ -48,9 +43,11 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <HashRouter>
-        <AppRoutes />
-      </HashRouter>
+      <ToastProvider> 
+        <HashRouter>
+          <AppRoutes />
+        </HashRouter>
+      </ToastProvider>
     </AuthProvider>
   );
 };

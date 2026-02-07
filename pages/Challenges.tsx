@@ -4,9 +4,11 @@ import { Challenge } from '../types';
 import { dataService } from '../services/dataService';
 import { SectionHeader, Button, Card, Badge, Modal, TextArea } from '../components/UI';
 import { Icons } from '../components/Icons';
+import { useToast } from '../components/Toast';
 
 export const Challenges: React.FC = () => {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newContent, setNewContent] = useState('');
@@ -29,6 +31,7 @@ export const Challenges: React.FC = () => {
     setChallenges([challenge, ...challenges]);
     setNewContent('');
     setIsModalOpen(false);
+    addToast('Desafio publicado com sucesso!', 'success');
   };
 
   const handleFinishChallenge = async (e: React.MouseEvent, id: string) => {
@@ -37,6 +40,7 @@ export const Challenges: React.FC = () => {
       await dataService.closeChallenge(id);
       const updated = await dataService.getChallenges();
       setChallenges([...updated]); 
+      addToast('Desafio marcado como concluído.', 'info');
     }
   };
 
@@ -69,10 +73,11 @@ export const Challenges: React.FC = () => {
 
   const submitContribution = async () => {
     if (!contributingChallenge || !contributionText) return;
-    await dataService.addContribution(contributingChallenge.id, contributionText, user);
+    const type = await dataService.addContribution(contributingChallenge.id, contributionText, user);
     const updated = await dataService.getChallenges();
     setChallenges([...updated]);
     setContributingChallenge(null);
+    addToast(`Contribuição enviada como ${type === 'CONTACT' ? 'Contato' : 'Conselho'}. Obrigado!`, 'success');
   };
 
   return (

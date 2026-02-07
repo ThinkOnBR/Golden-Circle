@@ -1,16 +1,17 @@
 import { User, UserRole, UserStatus, Challenge, Meeting, Candidate, Contribution } from '../types';
 
-// STATEFUL MOCK DATA (Persists in memory during session)
-// Em produção, isso seria substituído por chamadas de API (fetch/axios) para seu servidor.
+// --- DATA PERSISTENCE LAYER ---
+const STORAGE_KEY = 'CONFRARIA_DB_V1';
 
-let MOCK_USERS: User[] = [
+// Default Data (Initial State)
+const DEFAULT_USERS: User[] = [
   { id: 'master-01', name: 'Sanroma', email: 'sanroma@thinkondigital.com.br', password: '123456', phone: '11999999999', company: 'ThinkOn Digital', companies: ['ThinkOn Digital'], role: UserRole.MASTER, status: UserStatus.ACTIVE, bio: 'Master Admin.', revenue: '100M+' },
   { id: '1', name: 'Arthur Pendragon', email: 'arthur@kingsman.com', password: '123456', phone: '11999990001', company: 'Camelot Ventures', companies: ['Camelot Ventures', 'Excalibur Holdings'], role: UserRole.MASTER, status: UserStatus.ACTIVE, bio: 'Fundador e Visionário.', revenue: '50M+' },
   { id: '2', name: 'Lancelot du Lac', email: 'lancelot@roundtable.inc', password: '123456', phone: '11999990002', company: 'Knight Industries', companies: ['Knight Industries'], role: UserRole.ADMIN, status: UserStatus.ACTIVE, bio: 'Diretor de Operações.', revenue: '20M - 50M' },
   { id: '3', name: 'Galahad', email: 'harry@hart.co', password: '123456', phone: '11999990003', company: 'Tailors & Co', companies: ['Tailors & Co'], role: UserRole.PARTICIPANT, status: UserStatus.ACTIVE, bio: 'Membro Especialista.', revenue: '10M - 20M' },
 ];
 
-let MOCK_CHALLENGES: Challenge[] = [
+const DEFAULT_CHALLENGES: Challenge[] = [
   { 
     id: '101', 
     authorId: '3', 
@@ -41,11 +42,11 @@ let MOCK_CHALLENGES: Challenge[] = [
   },
 ];
 
-let MOCK_MEETINGS: Meeting[] = [
+const DEFAULT_MEETINGS: Meeting[] = [
   { id: '201', date: '2023-11-15', time: '19:00', location: 'Hotel Fasano, SP', description: 'Reunião Mensal de Alinhamento Estratégico', termAcceptedBy: ['1', '2'] }
 ];
 
-let MOCK_CANDIDATES: Candidate[] = [
+const DEFAULT_CANDIDATES: Candidate[] = [
   { 
     id: '301', 
     nominatorId: '3', 
@@ -57,19 +58,54 @@ let MOCK_CANDIDATES: Candidate[] = [
     role: 'CTO', 
     revenueRange: '10M - 50M', 
     bio: 'Pioneiro em IA generativa.', 
-    votes: { '1': 'APPROVE', '3': 'APPROVE' }, // Arthur and Galahad voted
+    votes: { '1': 'APPROVE', '3': 'APPROVE' }, 
     status: 'EVALUATING' 
   }
 ];
+
+interface DB {
+  users: User[];
+  challenges: Challenge[];
+  meetings: Meeting[];
+  candidates: Candidate[];
+}
+
+// Load from Storage or Initialize Defaults
+const loadDB = (): DB => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error("Failed to load persistence", e);
+  }
+  return {
+    users: DEFAULT_USERS,
+    challenges: DEFAULT_CHALLENGES,
+    meetings: DEFAULT_MEETINGS,
+    candidates: DEFAULT_CANDIDATES
+  };
+};
+
+// In-Memory Instance (synced to storage on changes)
+let db = loadDB();
+
+const saveDB = () => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  } catch (e) {
+    console.error("Failed to save persistence", e);
+  }
+};
 
 export const dataService = {
   // Authentication
   login: async (email: string, password: string): Promise<User> => {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
-        const user = MOCK_USERS.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+        const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
         if (user) {
-          // Clone to avoid reference issues
           resolve(JSON.parse(JSON.stringify(user)));
         } else {
           reject(new Error("Credenciais inválidas."));
@@ -79,15 +115,16 @@ export const dataService = {
   },
 
   getCurrentUser: async (): Promise<User> => {
-    return new Promise(resolve => setTimeout(() => resolve(MOCK_USERS[0]), 500));
+    return new Promise(resolve => setTimeout(() => resolve(db.users[0]), 500));
   },
   
   // Stats
   getUserStats: async (userId: string) => {
-    const challengesCreated = MOCK_CHALLENGES.filter(c => c.authorId === userId).length;
-    const contributions = userId === '1' ? 15 : userId === '2' ? 8 : 25; 
-    const totalMeetings = MOCK_MEETINGS.length;
-    const attended = MOCK_MEETINGS.filter(m => m.termAcceptedBy.includes(userId)).length;
+    const challengesCreated = db.challenges.filter(c => c.authorId === userId).length;
+    // Simple heuristic for mock stats
+    const contributions = db.challenges.reduce((acc, c) => acc + (c.contributions?.filter(ct => ct.authorId === userId).length || 0), 0) + (userId === '1' ? 10 : 0); 
+    const totalMeetings = db.meetings.length;
+    const attended = db.meetings.filter(m => m.termAcceptedBy.includes(userId)).length;
     const attendanceRate = totalMeetings > 0 ? Math.round((attended / totalMeetings) * 100) : 0;
 
     return {
@@ -98,34 +135,36 @@ export const dataService = {
   },
 
   getActiveMemberCount: () => {
-    return MOCK_USERS.filter(u => u.status === UserStatus.ACTIVE).length;
+    return db.users.filter(u => u.status === UserStatus.ACTIVE).length;
   },
 
   // Users (Admin)
   getAllUsers: async (): Promise<User[]> => {
-    return Promise.resolve([...MOCK_USERS]);
+    return Promise.resolve([...db.users]);
   },
 
   updateUser: async (updatedUser: User): Promise<void> => {
-    const index = MOCK_USERS.findIndex(u => u.id === updatedUser.id);
+    const index = db.users.findIndex(u => u.id === updatedUser.id);
     if (index !== -1) {
-      MOCK_USERS[index] = updatedUser;
+      db.users[index] = updatedUser;
+      saveDB();
     }
   },
 
   deleteUser: async (userId: string): Promise<void> => {
-    MOCK_USERS = MOCK_USERS.filter(u => u.id !== userId);
+    db.users = db.users.filter(u => u.id !== userId);
+    saveDB();
     return Promise.resolve();
   },
 
   // Challenges
   getChallenges: async (): Promise<Challenge[]> => {
-    return Promise.resolve([...MOCK_CHALLENGES]);
+    return Promise.resolve([...db.challenges]);
   },
 
   createChallenge: async (content: string, user: User): Promise<Challenge> => {
     const newChallenge: Challenge = {
-      id: Math.random().toString(),
+      id: Math.random().toString(36).substr(2, 9),
       authorId: user.id,
       authorName: user.name,
       company: user.company,
@@ -136,31 +175,29 @@ export const dataService = {
       adviceCount: 0,
       contributions: []
     };
-    MOCK_CHALLENGES.unshift(newChallenge);
+    db.challenges.unshift(newChallenge);
+    saveDB();
     return newChallenge;
   },
 
   closeChallenge: async (challengeId: string): Promise<void> => {
-    // Immutable update to ensure React detects changes properly
-    MOCK_CHALLENGES = MOCK_CHALLENGES.map(c => 
+    db.challenges = db.challenges.map(c => 
       c.id === challengeId ? { ...c, status: 'CLOSED' } : c
     );
+    saveDB();
     return Promise.resolve();
   },
 
   addContribution: async (challengeId: string, content: string, user: User): Promise<'CONTACT' | 'ADVICE'> => {
-    // Business Rule: Auto-detection
-    // Regex for Email OR Phone (simple check)
     const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/;
     const phoneRegex = /(\(?\d{2}\)?\s)?(\d{4,5}\-?\d{4})/;
     
     const isContact = emailRegex.test(content) || phoneRegex.test(content);
     const type = isContact ? 'CONTACT' : 'ADVICE';
 
-    // Find index to update immutably
-    const index = MOCK_CHALLENGES.findIndex(c => c.id === challengeId);
+    const index = db.challenges.findIndex(c => c.id === challengeId);
     if (index !== -1) {
-      const challenge = MOCK_CHALLENGES[index];
+      const challenge = db.challenges[index];
       
       const newContribution: Contribution = {
         id: Math.random().toString(36).substr(2, 9),
@@ -172,13 +209,13 @@ export const dataService = {
         createdAt: new Date().toISOString()
       };
 
-      // Create new challenge object with updated counts and contributions
-      MOCK_CHALLENGES[index] = {
+      db.challenges[index] = {
         ...challenge,
         contactCount: type === 'CONTACT' ? challenge.contactCount + 1 : challenge.contactCount,
         adviceCount: type !== 'CONTACT' ? challenge.adviceCount + 1 : challenge.adviceCount,
         contributions: [...(challenge.contributions || []), newContribution]
       };
+      saveDB();
     }
 
     return Promise.resolve(type);
@@ -186,19 +223,20 @@ export const dataService = {
 
   // Meetings
   getMeetings: async (): Promise<Meeting[]> => {
-    return Promise.resolve([...MOCK_MEETINGS]);
+    return Promise.resolve([...db.meetings]);
   },
 
   acceptMeetingTerm: async (meetingId: string, userId: string): Promise<void> => {
-    const meeting = MOCK_MEETINGS.find(m => m.id === meetingId);
+    const meeting = db.meetings.find(m => m.id === meetingId);
     if (meeting && !meeting.termAcceptedBy.includes(userId)) {
       meeting.termAcceptedBy.push(userId);
+      saveDB();
     }
   },
 
   // Candidates & Voting
   getCandidates: async (): Promise<Candidate[]> => {
-    return Promise.resolve([...MOCK_CANDIDATES]);
+    return Promise.resolve([...db.candidates]);
   },
 
   addCandidate: async (candidateData: Partial<Candidate>, nominator: User): Promise<void> => {
@@ -216,36 +254,33 @@ export const dataService = {
       votes: {},
       status: 'EVALUATING'
     };
-    MOCK_CANDIDATES.push(newCandidate);
+    db.candidates.push(newCandidate);
+    saveDB();
   },
 
-  voteCandidate: async (candidateId: string, userId: string, type: 'APPROVE' | 'VETO'): Promise<void> => {
-    const candidate = MOCK_CANDIDATES.find(c => c.id === candidateId);
-    if (!candidate) return;
+  voteCandidate: async (candidateId: string, userId: string, type: 'APPROVE' | 'VETO'): Promise<boolean> => {
+    const candidate = db.candidates.find(c => c.id === candidateId);
+    if (!candidate) return false;
 
     const currentVote = candidate.votes[userId];
 
-    // Logic: Toggle or Switch
     if (currentVote === type) {
-      // User clicked same vote again -> Remove vote (Abstain)
       delete candidate.votes[userId];
     } else {
-      // New vote or switching vote -> Set new type
       candidate.votes[userId] = type;
     }
 
     // Check Promotion Logic (80% of ACTIVE members)
-    const activeMembers = MOCK_USERS.filter(u => u.status === UserStatus.ACTIVE).length;
+    const activeMembers = db.users.filter(u => u.status === UserStatus.ACTIVE).length;
     const approvalVotes = Object.values(candidate.votes).filter(v => v === 'APPROVE').length;
-    
-    // Safety check to avoid division by zero
+    let promoted = false;
+
     if (activeMembers > 0) {
       const approvalRate = approvalVotes / activeMembers;
       
       if (approvalRate >= 0.8) {
-        // PROMOTE CANDIDATE
         const newUser: User = {
-          id: candidate.id, // Keep ID or generate new
+          id: candidate.id,
           name: candidate.name,
           email: candidate.email,
           phone: candidate.phone,
@@ -254,15 +289,22 @@ export const dataService = {
           role: UserRole.PARTICIPANT,
           status: UserStatus.ACTIVE,
           bio: candidate.bio,
-          password: 'generated_pass_123', // System generated password
+          password: 'generated_pass_123',
           revenue: candidate.revenueRange
         };
         
-        MOCK_USERS.push(newUser);
-        
-        // Remove from candidates list
-        MOCK_CANDIDATES = MOCK_CANDIDATES.filter(c => c.id !== candidateId);
+        db.users.push(newUser);
+        db.candidates = db.candidates.filter(c => c.id !== candidateId);
+        promoted = true;
       }
     }
+    saveDB();
+    return promoted;
+  },
+
+  // Debug Helper
+  resetDB: () => {
+    localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
   }
 };

@@ -4,9 +4,11 @@ import { Candidate, UserRole } from '../types';
 import { dataService } from '../services/dataService';
 import { SectionHeader, Button, Card, Badge, Modal, Input, TextArea } from '../components/UI';
 import { Icons } from '../components/Icons';
+import { useToast } from '../components/Toast';
 
 export const Members: React.FC = () => {
   const { user } = useAuth();
+  const { addToast } = useToast();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,16 +28,25 @@ export const Members: React.FC = () => {
   }, []);
 
   const handleVote = async (id: string, type: 'APPROVE' | 'VETO') => {
-    await dataService.voteCandidate(id, user.id, type);
+    const promoted = await dataService.voteCandidate(id, user.id, type);
     refreshData();
+    if (promoted) {
+      addToast('Candidato aprovado e promovido a membro oficial!', 'success');
+    } else {
+      addToast('Seu voto foi registrado.', 'info');
+    }
   };
 
   const handleIndicate = async () => {
-    if (!formData.name || !formData.email) return;
+    if (!formData.name || !formData.email) {
+      addToast('Nome e E-mail são obrigatórios', 'error');
+      return;
+    }
     await dataService.addCandidate(formData, user);
     setIsModalOpen(false);
     setFormData({ name: '', email: '', phone: '', companies: [''], bio: '', revenueRange: '' });
     refreshData();
+    addToast('Candidato indicado para avaliação do comitê.', 'success');
   };
 
   const handleCompanyChange = (index: number, value: string) => {
