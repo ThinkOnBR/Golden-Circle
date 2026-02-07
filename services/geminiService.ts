@@ -29,20 +29,23 @@ export const analyzeEngagement = async (userData: any, forceRefresh = false): Pr
   }
 
   // 2. Validate API Key
-  // As per guidelines, use process.env.API_KEY directly.
-  // We maintain the fallback check to gracefully handle missing keys in the demo UI.
-  if (!process.env.API_KEY) {
+  // PRIORITY: Check Runtime Injected Key (Server -> Client) FIRST, then build-time env.
+  // This allows the Docker container to control the key via dashboard environment variables.
+  const apiKey = (window as any).env?.API_KEY || process.env.API_KEY;
+
+  if (!apiKey) {
     console.warn("Gemini API Key missing. Returning mock analysis for UI demo.");
     return {
       classification: "Conector",
       suggestion: "Mentoria",
-      insight: "Modo demonstração (Sem API Key). O usuário apresenta bons índices de participação em desafios e reuniões.",
+      insight: "Modo demonstração (Sem API Key). Configure a variável API_KEY no painel de controle.",
       lastRun: new Date().toISOString()
     };
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Use the resolved apiKey
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     
     // 3. Construct Prompt with Aggregated Data
     const prompt = `
