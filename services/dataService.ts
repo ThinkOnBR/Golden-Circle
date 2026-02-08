@@ -114,6 +114,18 @@ export const dataService = {
     });
   },
 
+  // Used for Session Restoration (Auto-Login on Refresh)
+  getUserById: async (id: string): Promise<User | null> => {
+    return new Promise((resolve) => {
+      const user = db.users.find(u => u.id === id);
+      if (user) {
+        resolve(JSON.parse(JSON.stringify(user)));
+      } else {
+        resolve(null);
+      }
+    });
+  },
+
   getCurrentUser: async (): Promise<User> => {
     return new Promise(resolve => setTimeout(() => resolve(db.users[0]), 500));
   },

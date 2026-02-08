@@ -13,7 +13,7 @@ export const LogoMark: React.FC<{ className?: string }> = ({ className }) => (
 export const VerticalLogo: React.FC<{ className?: string }> = ({ className = "" }) => (
   <div className={`flex flex-col items-center ${className}`}>
     <img 
-      src="/imgs/logo_externa.png" 
+      src="https://capitalgoldencircle.com.br/public/imgs/logo_externa.png" 
       alt="Capital Golden Circle" 
       className="max-w-[250px] h-auto object-contain drop-shadow-[0_0_15px_rgba(234,179,8,0.15)]"
     />
@@ -23,7 +23,7 @@ export const VerticalLogo: React.FC<{ className?: string }> = ({ className = "" 
 export const HorizontalLogo: React.FC<{ className?: string }> = ({ className = "" }) => (
   <div className={`flex items-center ${className}`}>
     <img 
-      src="/imgs/logo_interna.png" 
+      src="https://capitalgoldencircle.com.br/public/imgs/logo_interna.png" 
       alt="Capital Golden Circle" 
       className="max-h-10 w-auto object-contain"
     />
