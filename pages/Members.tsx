@@ -20,7 +20,7 @@ export const Members: React.FC = () => {
 
   const refreshData = () => {
     dataService.getCandidates().then(setCandidates);
-    setActiveCount(dataService.getActiveMemberCount());
+    dataService.getActiveMemberCount().then(setActiveCount);
   };
 
   useEffect(() => {
@@ -124,7 +124,7 @@ export const Members: React.FC = () => {
       </div>
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Indicar Novo Membro">
-         <div className="space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar pr-2">
+         <div className="space-y-4">
             <Input placeholder="Nome Completo" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
             <Input placeholder="E-mail Corporativo" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
             <Input placeholder="Telefone / WhatsApp" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />

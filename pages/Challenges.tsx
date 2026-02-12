@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Challenge } from '../types';
+import { Challenge, UserRole } from '../types';
 import { dataService } from '../services/dataService';
 import { SectionHeader, Button, Card, Badge, Modal, TextArea } from '../components/UI';
 import { Icons } from '../components/Icons';
@@ -44,13 +44,24 @@ export const Challenges: React.FC = () => {
     }
   };
 
+  const handleDeleteChallenge = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (window.confirm('Tem certeza que deseja excluir este desafio?')) {
+      await dataService.softDeleteChallenge(id);
+      const updated = await dataService.getChallenges();
+      setChallenges([...updated]);
+      addToast('Desafio removido.', 'info');
+    }
+  };
+
   const openContributionModal = (challenge: Challenge) => {
     setContributingChallenge(challenge);
     setContributionText('');
     setDetectedType(null);
   };
 
-  const toggleContributions = (id: string) => {
+  const toggleContributions = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation(); // Impede cliques fantasmas
     if (expandedChallengeId === id) {
       setExpandedChallengeId(null);
     } else {
@@ -92,14 +103,22 @@ export const Challenges: React.FC = () => {
       <div className="grid gap-6">
         {challenges.map(c => {
           const isExpanded = expandedChallengeId === c.id;
-          const hasContributions = c.contributions && c.contributions.length > 0;
+          // Regra corrigida: Mostra se tiver array de contribuições OU se os contadores forem positivos (dados legados)
+          const hasDetails = c.contributions && c.contributions.length > 0;
+          const hasActivity = hasDetails || c.contactCount > 0 || c.adviceCount > 0;
+          
+          const canDelete = user.role === UserRole.MASTER || user.role === UserRole.ADMIN || user.id === c.authorId;
           
           return (
             <Card key={c.id} className={`border-l-4 ${c.status === 'OPEN' ? 'border-l-gold-600' : 'border-l-zinc-700 opacity-75'}`}>
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-gold-500 font-serif overflow-hidden border border-zinc-700">
-                     <span>{c.authorName[0]}</span>
+                  <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-gold-500 font-serif overflow-hidden border border-zinc-700 shrink-0">
+                     {c.authorAvatar ? (
+                       <img src={c.authorAvatar} alt={c.authorName} className="w-full h-full object-cover" />
+                     ) : (
+                       <span>{c.authorName[0]}</span>
+                     )}
                   </div>
                   <div>
                     <h3 className="font-bold text-white text-sm">{c.authorName}</h3>
@@ -107,6 +126,16 @@ export const Challenges: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  {canDelete && (
+                    <button 
+                      onClick={(e) => handleDeleteChallenge(e, c.id)}
+                      className="text-zinc-500 hover:text-red-500 p-1"
+                      title="Excluir Desafio"
+                    >
+                      <Icons.Trash />
+                    </button>
+                  )}
+
                   {c.status === 'OPEN' && c.authorId === user.id && (
                     <button 
                       onClick={(e) => handleFinishChallenge(e, c.id)}
@@ -120,7 +149,7 @@ export const Challenges: React.FC = () => {
                   </Badge>
                 </div>
               </div>
-              <p className="text-zinc-300 mb-6 text-lg leading-relaxed">{c.content}</p>
+              <p className="text-zinc-300 mb-6 text-lg leading-relaxed whitespace-pre-line">{c.content}</p>
               
               <div className="flex flex-wrap gap-4 border-t border-white/5 pt-4 items-center">
                 <div className="flex gap-4">
@@ -133,10 +162,10 @@ export const Challenges: React.FC = () => {
                 </div>
 
                 <div className="flex-1 flex justify-end gap-3">
-                  {hasContributions && (
+                  {hasActivity && (
                     <button 
-                      onClick={() => toggleContributions(c.id)}
-                      className="text-zinc-400 hover:text-white text-xs flex items-center gap-1 uppercase tracking-wider"
+                      onClick={(e) => toggleContributions(e, c.id)}
+                      className="text-zinc-400 hover:text-white text-xs flex items-center gap-1 uppercase tracking-wider cursor-pointer"
                     >
                       {isExpanded ? 'Ocultar' : 'Ver'} Contribuições
                       {isExpanded ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
@@ -155,28 +184,37 @@ export const Challenges: React.FC = () => {
               </div>
 
               {/* LISTA DE CONTRIBUIÇÕES EXPANDIDA */}
-              {isExpanded && hasContributions && (
+              {isExpanded && (
                 <div className="mt-4 pt-4 border-t border-dashed border-zinc-800 space-y-3 animate-fade-in-up">
-                   {c.contributions.map(contrib => (
-                     <div key={contrib.id} className="bg-black/40 rounded p-3 border border-zinc-800/50">
-                        <div className="flex justify-between items-center mb-2">
-                           <div className="flex items-center gap-2">
-                             <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-400 border border-zinc-700">
-                                {contrib.authorName[0]}
+                   {hasDetails ? (
+                     c.contributions.map(contrib => (
+                       <div key={contrib.id} className="bg-black/40 rounded p-3 border border-zinc-800/50">
+                          <div className="flex justify-between items-center mb-2">
+                             <div className="flex items-center gap-2">
+                               <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-400 border border-zinc-700 shrink-0">
+                                  {contrib.authorName[0]}
+                               </div>
+                               <span className="text-xs text-zinc-300 font-bold">{contrib.authorName}</span>
                              </div>
-                             <span className="text-xs text-zinc-300 font-bold">{contrib.authorName}</span>
-                           </div>
-                           <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                             contrib.type === 'CONTACT' 
-                               ? 'text-blue-400 border-blue-900 bg-blue-900/10' 
-                               : 'text-purple-400 border-purple-900 bg-purple-900/10'
-                           }`}>
-                             {contrib.type === 'CONTACT' ? 'Contato' : 'Conselho'}
-                           </span>
-                        </div>
-                        <p className="text-sm text-zinc-400 pl-8">{contrib.content}</p>
+                             <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
+                               contrib.type === 'CONTACT' 
+                                 ? 'text-blue-400 border-blue-900 bg-blue-900/10' 
+                                 : 'text-purple-400 border-purple-900 bg-purple-900/10'
+                             }`}>
+                               {contrib.type === 'CONTACT' ? 'Contato' : 'Conselho'}
+                             </span>
+                          </div>
+                          <p className="text-sm text-zinc-400 pl-8 whitespace-pre-line">{contrib.content}</p>
+                       </div>
+                     ))
+                   ) : (
+                     <div className="p-4 bg-zinc-900/30 rounded border border-zinc-800 text-center">
+                        <p className="text-zinc-500 text-xs italic">
+                          As contribuições deste desafio são anteriores à atualização do sistema de histórico detalhado. 
+                          <br/>Apenas a contagem numérica está disponível.
+                        </p>
                      </div>
-                   ))}
+                   )}
                 </div>
               )}
             </Card>

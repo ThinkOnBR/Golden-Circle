@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' }> = ({ 
   children, 
@@ -44,7 +45,7 @@ export const PasswordInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>
       >
         {show ? (
            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
           </svg>
         ) : (
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -77,19 +78,34 @@ export const Badge: React.FC<{ children: React.ReactNode; color?: string }> = ({
 );
 
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg bg-obsidian border border-gold-600/30 rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="bg-zinc-900/50 p-4 border-b border-zinc-800 flex justify-between items-center shrink-0">
-          <h3 className="font-serif text-gold-500 text-lg tracking-widest">{title}</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-white">&times;</button>
-        </div>
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {children}
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm">
+      <div className="flex min-h-full items-start justify-center p-4 pt-10 md:pt-20">
+        <div className="w-full max-w-lg bg-obsidian border border-gold-600/30 rounded-lg shadow-2xl overflow-hidden flex flex-col relative mb-10">
+          <div className="bg-zinc-900/50 p-4 border-b border-zinc-800 flex justify-between items-center shrink-0">
+            <h3 className="font-serif text-gold-500 text-lg tracking-widest">{title}</h3>
+            <button onClick={onClose} className="text-zinc-500 hover:text-white">&times;</button>
+          </div>
+          <div className="p-6">
+            {children}
+          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

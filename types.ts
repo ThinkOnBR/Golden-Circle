@@ -39,10 +39,11 @@ export interface Challenge {
   id: string;
   authorId: string;
   authorName: string;
+  authorAvatar?: string; // Avatar do criador
   company: string;
   content: string;
   createdAt: string;
-  status: 'OPEN' | 'CLOSED';
+  status: 'OPEN' | 'CLOSED' | 'DELETED'; // Novo status DELETED
   contactCount: number;
   adviceCount: number;
   contributions: Contribution[]; // Histórico real de contribuições

@@ -1,7 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, URL } from 'url';
 import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,7 +14,7 @@ const BUILD_PATH = path.join(__dirname, 'build');
 let appStatus = 'INITIALIZING'; // INITIALIZING, BUILDING, READY, ERROR
 let buildLogs = [];
 
-// Tipos MIME para servir arquivos estáticos corretamente sem Express
+// Tipos MIME
 const MIME_TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -26,13 +26,12 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
-  '.xml': 'application/xml'
+  '.xml': 'application/xml',
+  '.txt': 'text/plain'
 };
 
-// Função auxiliar para rodar comandos do sistema
 const runCommand = (command, args) => {
   return new Promise((resolve, reject) => {
-    // shell: true ajuda a encontrar o comando npm no path
     const process = spawn(command, args, { stdio: 'pipe', shell: true });
     
     process.stdout.on('data', (data) => {
@@ -56,24 +55,21 @@ const runCommand = (command, args) => {
   });
 };
 
-// Lógica de Build Automático
 const startBuildProcess = async () => {
   if (appStatus === 'BUILDING' || appStatus === 'READY') return;
   
   try {
     appStatus = 'BUILDING';
-    buildLogs.push('Iniciando processo de build (Node Native Server)...');
+    buildLogs.push('Iniciando processo de build...');
     
     // 1. NPM INSTALL
     buildLogs.push('Instalando dependências...');
-    // --omit=dev se quiser economizar tempo, mas precisamos do 'vite' que geralmente é devDep
     await runCommand('npm', ['install', '--no-package-lock', '--loglevel=error']);
     
     // 2. NPM RUN BUILD
     buildLogs.push('Compilando aplicação (Vite)...');
     await runCommand('npm', ['run', 'build']);
     
-    // Verificação final
     if (fs.existsSync(path.join(BUILD_PATH, 'index.html'))) {
       appStatus = 'READY';
       buildLogs.push('Build concluído com sucesso!');
@@ -88,29 +84,40 @@ const startBuildProcess = async () => {
   }
 };
 
-// SERVER NATIVO (Sem dependência do Express)
 const server = http.createServer((req, res) => {
-  // Health Check básico para o Cloud Run
+  // Health Check
   if (req.url === '/health') {
     res.writeHead(200);
     res.end('OK');
     return;
   }
 
-  // Se o app estiver pronto, serve os arquivos estáticos
+  // APP READY
   if (appStatus === 'READY') {
-    let filePath = path.join(BUILD_PATH, req.url === '/' ? 'index.html' : req.url);
-    
-    // Segurança básica para evitar sair do diretório
-    if (!filePath.startsWith(BUILD_PATH)) {
-      res.writeHead(403);
-      res.end('Forbidden');
-      return;
-    }
+    // 1. CORREÇÃO MOBILE: Sanitizar URL
+    // Remove query params (ex: ?fbclid=...) que causam erro 403 ao tentar buscar arquivo com nome sujo
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host || 'localhost';
+    const parsedUrl = new URL(req.url, `${protocol}://${host}`);
+    let pathname = parsedUrl.pathname;
 
-    // Se não existir arquivo, assume que é uma rota SPA e serve index.html
+    // Normaliza caminho para evitar Directory Traversal
+    const safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    
+    // Determina o arquivo físico
+    let filePath = path.join(BUILD_PATH, safePath === '/' ? 'index.html' : safePath);
+
+    // Lógica de SPA (Single Page Application)
+    // Se o arquivo solicitado NÃO existe no disco...
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      filePath = path.join(BUILD_PATH, 'index.html');
+        // Se tem extensão (ex: style.css, logo.png), é um arquivo faltando -> 404
+        if (path.extname(filePath)) {
+            res.writeHead(404);
+            res.end('File not found');
+            return;
+        }
+        // Se não tem extensão (ex: /dashboard, /login), é uma rota do App -> serve index.html
+        filePath = path.join(BUILD_PATH, 'index.html');
     }
 
     const extname = path.extname(filePath);
@@ -118,52 +125,48 @@ const server = http.createServer((req, res) => {
 
     fs.readFile(filePath, (error, content) => {
       if (error) {
-        if(error.code == 'ENOENT'){
-           // Fallback final
-           res.writeHead(404);
-           res.end('Arquivo não encontrado');
-        } else {
-           res.writeHead(500);
-           res.end('Erro interno: ' + error.code);
-        }
+        res.writeHead(500);
+        res.end('Server Error: ' + error.code);
       } else {
-        // Injeção de API Key no HTML principal
+        // Injeção de API Key apenas no HTML
         if (extname === '.html') {
           const apiKey = process.env.API_KEY || '';
           let html = content.toString('utf8');
-          html = html.replace('window.env = { API_KEY: "" };', `window.env = { API_KEY: "${apiKey}" };`);
+          // Substituição segura
+          html = html.replace(/window\.env\s*=\s*\{\s*API_KEY:\s*""\s*\};/, `window.env = { API_KEY: "${apiKey}" };`);
           content = Buffer.from(html, 'utf8');
         }
         
-        res.writeHead(200, { 'Content-Type': contentType });
+        // Cache control para assets estáticos vs HTML
+        const cacheControl = extname === '.html' ? 'no-cache' : 'public, max-age=31536000';
+        
+        res.writeHead(200, { 
+            'Content-Type': contentType,
+            'Cache-Control': cacheControl
+        });
         res.end(content, 'utf-8');
       }
     });
     return;
   }
 
-  // TELA DE LOADING (Enquanto instala/compila)
+  // TELA DE LOADING
   if (appStatus === 'BUILDING' || appStatus === 'INITIALIZING') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(`
       <!DOCTYPE html>
       <html style="background:#050505;color:#e5e5e5;font-family:sans-serif;">
-      <head>
-        <title>Instalando Confraria...</title>
-        <meta http-equiv="refresh" content="3">
-      </head>
+      <head><meta http-equiv="refresh" content="3"><title>Carregando...</title></head>
       <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;">
-        <div style="border:1px solid #ca8a04;padding:2rem;border-radius:10px;background:#111;text-align:center;max-width:500px;">
-          <h1 style="color:#eab308;margin-bottom:10px;">Preparando Sistema</h1>
-          <p style="color:#888;">Instalando dependências e compilando o frontend.<br>Isso acontece apenas na primeira inicialização.</p>
-          <div style="margin:20px 0;width:100%;background:#222;height:10px;border-radius:5px;overflow:hidden;">
-            <div style="width:100%;height:100%;background:#eab308;animation:pulse 2s infinite;"></div>
+        <div style="border:1px solid #ca8a04;padding:2rem;border-radius:10px;background:#111;text-align:center;">
+          <h1 style="color:#eab308;">Iniciando Sistema</h1>
+          <p>Configurando ambiente seguro...</p>
+          <div style="margin:20px 0;width:200px;background:#222;height:4px;border-radius:2px;overflow:hidden;">
+            <div style="width:100%;height:100%;background:#eab308;animation:p 2s infinite;"></div>
           </div>
-          <div style="text-align:left;background:#000;padding:10px;border-radius:5px;font-family:monospace;font-size:10px;color:#0f0;height:100px;overflow:hidden;">
-            ${buildLogs.map(l => `> ${l}<br>`).join('')}
-          </div>
+          <pre style="text-align:left;font-size:10px;color:#666;">${buildLogs[buildLogs.length-1] || 'Aguardando...'}</pre>
         </div>
-        <style>@keyframes pulse { 0% {opacity:0.5} 50% {opacity:1} 100% {opacity:0.5} }</style>
+        <style>@keyframes p { 0% {transform:translateX(-100%)} 100% {transform:translateX(100%)} }</style>
       </body>
       </html>
     `);
@@ -173,24 +176,15 @@ const server = http.createServer((req, res) => {
   // TELA DE ERRO
   if (appStatus === 'ERROR') {
     res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
-      <h1>Erro Crítico na Instalação</h1>
-      <pre style="background:#222;color:#f55;padding:20px;">${buildLogs.join('\n')}</pre>
-    `);
+    res.end(`<h1>Erro Fatal</h1><pre>${buildLogs.join('\n')}</pre>`);
   }
 });
 
-// Inicia o servidor IMEDIATAMENTE para o Cloud Run não dar timeout
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Server] Servidor NATIVO rodando na porta ${PORT}`);
-  
-  // Verifica se o build já existe
+  console.log(`[Server] Rodando na porta ${PORT}`);
   if (fs.existsSync(path.join(BUILD_PATH, 'index.html'))) {
-    console.log('[Server] Build encontrado. Pulando instalação.');
     appStatus = 'READY';
   } else {
-    // Pequeno delay para garantir que o server.listen processe antes de travar a CPU com npm install
-    console.log('[Server] Build não encontrado. Agendando instalação...');
-    setTimeout(startBuildProcess, 2000);
+    setTimeout(startBuildProcess, 1000);
   }
 });

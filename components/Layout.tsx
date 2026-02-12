@@ -42,9 +42,9 @@ export const Layout: React.FC = () => {
           <NavItem path="/challenges" icon={Icons.Briefcase} label="Desafios" />
           <NavItem path="/meetings" icon={Icons.Calendar} label="Reuniões" />
           <NavItem path="/members" icon={Icons.Users} label="Membros" />
-          {user.role !== UserRole.PARTICIPANT && (
-            <NavItem path="/admin" icon={Icons.Shield} label="Admin" />
-          )}
+          
+          {/* Admin agora é visível para todos, mas o conteúdo interno muda conforme a Role */}
+          <NavItem path="/admin" icon={Icons.Shield} label={user.role === UserRole.PARTICIPANT ? "Meu Perfil" : "Admin / Gestão"} />
         </nav>
 
         <div className="p-4 border-t border-zinc-900">

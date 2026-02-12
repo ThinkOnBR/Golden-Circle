@@ -9,26 +9,53 @@ export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [aiAnalysis, setAiAnalysis] = useState<EngagementAnalysis | null>(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  
+  // Real Stats State
+  const [stats, setStats] = useState({ contributions: 0, attendance: 0, rank: 0, points: 0 });
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
   // If user is null, we shouldn't be here (protected route), but TS needs check
   if (!user) return null;
 
-  const runAiAnalysis = async (force = false) => {
-    setLoadingAi(true);
+  useEffect(() => {
+    loadDashboardData();
+  }, [user.id]);
+
+  const loadDashboardData = async () => {
+      // Parallel fetch for speed
+      const [userStats, allRankings] = await Promise.all([
+          dataService.getUserStats(user.id),
+          dataService.getLeaderboard()
+      ]);
+
+      // Calculate my rank
+      const myRankIndex = allRankings.findIndex(r => r.id === user.id);
+      const myData = allRankings[myRankIndex];
+
+      setStats({
+          contributions: userStats.contributions,
+          attendance: userStats.attendance,
+          rank: myRankIndex !== -1 ? myRankIndex + 1 : allRankings.length,
+          points: myData ? myData.points : 0
+      });
+
+      setLeaderboard(allRankings.slice(0, 5)); // Show Top 5
+      
+      // Run AI (Silent)
+      runAiAnalysis({ ...userStats, userId: user.id }, false);
+  };
+
+  const runAiAnalysis = async (userData: any, force = false) => {
+    if (force) setLoadingAi(true);
     try {
-      const stats = await dataService.getUserStats(user.id);
-      const result = await analyzeEngagement({ ...stats, userId: user.id }, force);
+      const result = await analyzeEngagement(userData, force);
       if (result) setAiAnalysis(result);
     } catch (e) {
       console.error("Failed to run AI analysis", e);
     } finally {
-      setLoadingAi(false);
+      if (force) setLoadingAi(false);
     }
   };
-
-  useEffect(() => {
-    runAiAnalysis(false);
-  }, [user.id]);
 
   return (
     <div>
@@ -36,10 +63,10 @@ export const Dashboard: React.FC = () => {
       
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Contribuições', value: '12', color: 'text-white' },
-          { label: 'Rank', value: '#4', color: 'text-gold-500' },
-          { label: 'Pontos', value: '850', color: 'text-white' },
-          { label: 'Presença', value: '100%', color: 'text-green-500' }
+          { label: 'Contribuições', value: stats.contributions, color: 'text-white' },
+          { label: 'Rank', value: `#${stats.rank}`, color: 'text-gold-500' },
+          { label: 'Pontos', value: stats.points, color: 'text-white' },
+          { label: 'Presença', value: `${stats.attendance}%`, color: 'text-green-500' }
         ].map((stat, i) => (
           <Card key={i} className="text-center py-4 px-2">
             <div className={`text-3xl font-bold font-serif ${stat.color}`}>{stat.value}</div>
@@ -55,7 +82,10 @@ export const Dashboard: React.FC = () => {
               <span className="text-gold-500 text-lg">✦</span> Gemini 3 Analysis
             </h3>
             <button 
-              onClick={() => runAiAnalysis(true)} 
+              onClick={() => {
+                   setLoadingAi(true);
+                   dataService.getUserStats(user.id).then(s => runAiAnalysis({...s, userId: user.id}, true));
+              }} 
               disabled={loadingAi}
               className="flex items-center gap-1 text-xs text-gold-600 hover:text-gold-400 uppercase tracking-wider disabled:opacity-50"
             >
@@ -99,21 +129,28 @@ export const Dashboard: React.FC = () => {
 
         <Card>
           <h3 className="text-white font-bold mb-4">Ranking Mensal</h3>
-          <ul className="space-y-3">
-            {[
-              { name: 'Arthur Pendragon', points: 1200, change: '+2' },
-              { name: 'Lancelot du Lac', points: 980, change: '-1' },
-              { name: 'Galahad', points: 850, change: '0' },
-            ].map((u, i) => (
-              <li key={i} className="flex justify-between items-center border-b border-white/5 pb-2 last:border-0">
-                <div className="flex items-center gap-3">
-                  <span className={`font-serif font-bold ${i === 0 ? 'text-gold-500' : 'text-zinc-500'}`}>0{i+1}</span>
-                  <span className="text-zinc-300 text-sm">{u.name}</span>
-                </div>
-                <div className="text-zinc-500 text-xs font-mono">{u.points} pts</div>
-              </li>
-            ))}
-          </ul>
+          {leaderboard.length > 0 ? (
+              <ul className="space-y-3">
+                {leaderboard.map((u, i) => (
+                  <li key={u.id} className={`flex justify-between items-center border-b border-white/5 pb-2 last:border-0 ${u.id === user.id ? 'bg-zinc-800/50 -mx-2 px-2 rounded' : ''}`}>
+                    <div className="flex items-center gap-3">
+                      <span className={`font-serif font-bold w-6 ${i === 0 ? 'text-gold-500' : 'text-zinc-500'}`}>0{i+1}</span>
+                      <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] overflow-hidden">
+                              {u.avatarUrl ? <img src={u.avatarUrl} className="w-full h-full object-cover" alt="" /> : u.name[0]}
+                          </div>
+                          <span className={`${u.id === user.id ? 'text-white font-bold' : 'text-zinc-300'} text-sm`}>
+                             {u.name} {u.id === user.id && '(Você)'}
+                          </span>
+                      </div>
+                    </div>
+                    <div className="text-zinc-500 text-xs font-mono">{u.points} pts</div>
+                  </li>
+                ))}
+              </ul>
+          ) : (
+              <p className="text-zinc-500 text-sm py-4">Carregando ranking...</p>
+          )}
         </Card>
       </div>
     </div>
