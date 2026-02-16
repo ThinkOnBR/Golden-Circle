@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { User, UserRole } from '../types';
@@ -17,19 +18,15 @@ export const Admin: React.FC = () => {
 
   useEffect(() => {
     dataService.getAllUsers().then(fetchedUsers => {
-      // FILTRO DE VISUALIZAÇÃO DA TABELA
       if (currentUser.role === UserRole.PARTICIPANT) {
-        // Participante só vê ele mesmo
         setUsers(fetchedUsers.filter(u => u.id === currentUser.id));
       } else {
-        // Master e Admin veem todos
         setUsers(fetchedUsers);
       }
     });
   }, [editingUser, currentUser.id, currentUser.role]);
 
   const handleEdit = (user: User) => {
-    // Garante que campos opcionais existam para o formulário
     const safeUser = {
       ...user,
       companies: user.companies || [user.company || ''],
@@ -44,42 +41,26 @@ export const Admin: React.FC = () => {
   const handleSave = async () => {
     if (editingUser) {
        try {
-         // 1. Atualizar dados no Firestore
          const userToUpdate = { ...editingUser };
-         // Garante que a empresa principal seja a primeira da lista
          if (userToUpdate.companies && userToUpdate.companies.length > 0) {
             userToUpdate.company = userToUpdate.companies[0];
          }
          await dataService.updateUser(userToUpdate);
 
-         // 2. Atualizar Senha (Lógica complexa de segurança)
          if (newPassword) {
             if (currentUser.id === editingUser.id) {
-               // Alterando a própria senha
                await dataService.changeUserPassword(newPassword);
-               addToast('Dados e senha atualizados com sucesso.', 'success');
+               addToast('Seu perfil e sua NOVA SENHA foram atualizados!', 'success');
             } else {
-               // Master/Admin tentando alterar senha de outro
-               // O Client SDK não permite updatePassword de outro user sem estar logado como ele.
-               // A melhor prática é enviar email de reset ou usar Cloud Functions.
-               addToast('Dados salvos. Para a senha de TERCEIROS, use o botão "Enviar E-mail de Redefinição".', 'info');
+               // Feedback visual claro sobre a limitação do Client SDK para senhas de terceiros
+               addToast('Dados do membro salvos. Para alterar a senha deste membro, utilize o botão "Enviar E-mail de Redefinição".', 'info');
             }
          } else {
-            addToast('Dados atualizados com sucesso.', 'success');
+            addToast('Dados salvos com sucesso.', 'success');
          }
 
          setEditingUser(null);
-         const updatedUsers = await dataService.getAllUsers();
-         
-         // Reaplica o filtro após salvar
-         if (currentUser.role === UserRole.PARTICIPANT) {
-            setUsers(updatedUsers.filter(u => u.id === currentUser.id));
-         } else {
-            setUsers(updatedUsers);
-         }
-
        } catch (error: any) {
-         console.error(error);
          addToast('Erro ao atualizar: ' + error.message, 'error');
        }
     }
@@ -88,18 +69,15 @@ export const Admin: React.FC = () => {
   const handleDelete = async (userId: string) => {
     const isSelf = currentUser.id === userId;
     const confirmMsg = isSelf 
-      ? "Deseja realmente encerrar sua conta? Você perderá acesso à Confraria."
-      : "Tem certeza que deseja remover este membro? Esta ação é irreversível.";
+      ? "Deseja realmente encerrar sua conta?"
+      : "Tem certeza que deseja remover este membro?";
 
     if (window.confirm(confirmMsg)) {
       try {
         await dataService.deleteUser(userId);
         addToast(isSelf ? 'Conta encerrada.' : 'Membro removido.', 'success');
-        
-        // Se deletou a si mesmo, logout ou refresh (o AuthContext vai notar user null eventualmente, mas forçamos refresh da lista)
-        if (isSelf) {
-            window.location.reload(); 
-        } else {
+        if (isSelf) window.location.reload(); 
+        else {
             const updated = await dataService.getAllUsers();
             setUsers(updated);
         }
@@ -113,9 +91,9 @@ export const Admin: React.FC = () => {
      if (editingUser) {
         try {
            await dataService.recoverPassword(editingUser.email);
-           addToast(`E-mail de redefinição enviado para ${editingUser.email}`, 'success');
+           addToast(`E-mail de redefinição enviado para ${editingUser.email}. Verifique a caixa de entrada do membro.`, 'success');
         } catch (e) {
-           addToast('Erro ao enviar e-mail.', 'error');
+           addToast('Erro ao enviar e-mail de recuperação.', 'error');
         }
      }
   };
@@ -153,11 +131,10 @@ export const Admin: React.FC = () => {
     }
   };
 
-  // --- REGRAS DE VISUALIZAÇÃO ---
   const canDelete = (targetUser: User) => {
     if (currentUser.role === UserRole.MASTER) return true;
     if (currentUser.role === UserRole.ADMIN && targetUser.role === UserRole.PARTICIPANT) return true;
-    if (currentUser.id === targetUser.id) return true; // Pode se deletar (sair)
+    if (currentUser.id === targetUser.id) return true;
     return false;
   };
 
@@ -168,10 +145,7 @@ export const Admin: React.FC = () => {
      return false;
   };
   
-  // Regra de Senha: Só vê o campo se for MASTER ou se for o próprio usuário
   const showPasswordField = currentUser.role === UserRole.MASTER || (editingUser && currentUser.id === editingUser.id);
-  
-  // Regra de Role: Só MASTER pode mudar roles
   const canChangeRole = currentUser.role === UserRole.MASTER;
 
   return (
@@ -258,7 +232,6 @@ export const Admin: React.FC = () => {
       <Modal isOpen={!!editingUser} onClose={() => setEditingUser(null)} title={currentUser.id === editingUser?.id ? "Editar Meu Perfil" : "Editar Membro"}>
         {editingUser && (
           <div className="space-y-6">
-            {/* AVATAR */}
             <div className="flex flex-col items-center gap-3 pb-4 border-b border-zinc-800">
                 <div className="relative group cursor-pointer w-24 h-24">
                     <div className="w-24 h-24 rounded-full border-2 border-gold-500 overflow-hidden bg-zinc-800 flex items-center justify-center">
@@ -277,7 +250,6 @@ export const Admin: React.FC = () => {
                 <p className="text-[10px] text-zinc-500">Clique na imagem para alterar</p>
             </div>
 
-             {/* DADOS PESSOAIS */}
              <div className="space-y-4">
                 <h4 className="text-gold-500 text-xs font-bold uppercase tracking-widest border-b border-zinc-800 pb-1">Dados Pessoais</h4>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -296,7 +268,6 @@ export const Admin: React.FC = () => {
                 </div>
              </div>
 
-             {/* DADOS EMPRESARIAIS */}
              <div className="space-y-4">
                 <h4 className="text-gold-500 text-xs font-bold uppercase tracking-widest border-b border-zinc-800 pb-1">Empresas & Negócios</h4>
                 
@@ -337,7 +308,6 @@ export const Admin: React.FC = () => {
                 </div>
              </div>
 
-             {/* ACESSO E SEGURANÇA */}
              <div className="space-y-4">
                 <h4 className="text-gold-500 text-xs font-bold uppercase tracking-widest border-b border-zinc-800 pb-1">Acesso & Segurança</h4>
                 
@@ -359,20 +329,23 @@ export const Admin: React.FC = () => {
 
                     {showPasswordField && (
                         <div>
-                            <label className="text-[10px] text-zinc-500 uppercase font-bold mb-1 block">Nova Senha</label>
+                            <label className="text-[10px] text-zinc-500 uppercase font-bold mb-1 block">Definir Nova Senha</label>
                             <PasswordInput 
                                 value={newPassword} 
                                 onChange={e => setNewPassword(e.target.value)} 
-                                placeholder="Deixe em branco para manter"
+                                placeholder="Mantenha em branco para não alterar"
                             />
+                            <p className="text-[9px] text-zinc-600 mt-1 italic">
+                              * Por segurança, senhas são criptografadas e não podem ser visualizadas.
+                            </p>
                             {currentUser.id !== editingUser.id && (
                                 <div className="mt-2">
                                     <button 
                                         type="button" 
                                         onClick={handleSendPasswordReset}
-                                        className="text-[10px] text-gold-500 underline hover:text-gold-400"
+                                        className="text-[10px] text-gold-500 underline hover:text-gold-400 font-bold"
                                     >
-                                        Ou envie um e-mail de redefinição
+                                        Recomendar troca: Enviar Link de Redefinição via E-mail
                                     </button>
                                 </div>
                             )}

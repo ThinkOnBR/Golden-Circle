@@ -1,3 +1,4 @@
+
 import { User, UserRole, UserStatus, Challenge, Meeting, Candidate, Contribution } from '../types';
 import { auth, db } from './firebaseConfig';
 import { 
@@ -20,26 +21,10 @@ import {
   orderBy
 } from "firebase/firestore";
 
-// --- DEFAULT DATA FOR SEEDING ---
-// Removido o Sanroma daqui pois ele será criado dinamicamente no login
-const DEFAULT_USERS_SEED: User[] = [
-  { id: '1', name: 'Arthur Pendragon', email: 'arthur@kingsman.com', phone: '11999990001', company: 'Camelot Ventures', companies: ['Camelot Ventures', 'Excalibur Holdings'], role: UserRole.MASTER, status: UserStatus.ACTIVE, bio: 'Fundador e Visionário.', revenue: '50M+' },
-  { id: '2', name: 'Lancelot du Lac', email: 'lancelot@roundtable.inc', phone: '11999990002', company: 'Knight Industries', companies: ['Knight Industries'], role: UserRole.ADMIN, status: UserStatus.ACTIVE, bio: 'Diretor de Operações.', revenue: '20M - 50M' },
-  { id: '3', name: 'Galahad', email: 'harry@hart.co', phone: '11999990003', company: 'Tailors & Co', companies: ['Tailors & Co'], role: UserRole.PARTICIPANT, status: UserStatus.ACTIVE, bio: 'Membro Especialista.', revenue: '10M - 20M' },
-];
-
-const DEFAULT_CHALLENGES: Challenge[] = [
-  { 
-    id: '101', authorId: '3', authorName: 'Galahad', company: 'Tailors & Co', 
-    content: 'Preciso de introdução a fornecedores de tecidos balísticos na Ásia. Volume alto.', 
-    createdAt: '2023-10-25', status: 'OPEN', contactCount: 2, adviceCount: 1,
-    contributions: [] 
-  }
-];
-
-const DEFAULT_MEETINGS: Meeting[] = [
-  { id: '201', date: '2023-11-15', time: '19:00', location: 'Hotel Fasano, SP', description: 'Reunião Mensal de Alinhamento Estratégico', termAcceptedBy: ['1', '2'] }
-];
+// --- DEFAULT DATA FOR SEEDING (REMOVIDO PARA EVITAR DADOS FAKES) ---
+const DEFAULT_USERS_SEED: User[] = [];
+const DEFAULT_CHALLENGES: Challenge[] = [];
+const DEFAULT_MEETINGS: Meeting[] = [];
 
 export const dataService = {
   // --- AUTHENTICATION ---
@@ -49,18 +34,17 @@ export const dataService = {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
       
-      // 1. Tenta buscar dados do perfil no Firestore
       const userDoc = await getDoc(doc(db, "users", uid)); 
       
       if (userDoc.exists()) {
         return { id: userDoc.id, ...userDoc.data() } as User;
       } else {
-        // 2. AUTO-BOOTSTRAP PARA O MASTER (Primeiro Acesso)
+        // AUTO-BOOTSTRAP APENAS PARA O MASTER (Sanroma)
         if (email.toLowerCase() === 'sanroma@thinkondigital.com.br') {
-            console.log("Detectado login de Master sem perfil. Criando perfil e populando banco...");
+            console.log("Detectado login de Master. Restaurando perfil...");
             
             const newMasterUser: User = {
-                id: uid, // Usa o UID real do Auth
+                id: uid,
                 name: 'Sanroma',
                 email: email,
                 phone: '11999999999',
@@ -72,25 +56,11 @@ export const dataService = {
                 revenue: '100M+'
             };
 
-            // Salva o perfil do Master
             await setDoc(doc(db, "users", uid), newMasterUser);
-            
-            // Popula o resto do banco para as associações funcionarem
-            await dataService.initializeDB();
-
             return newMasterUser;
         }
-
-        // 3. Fallback para migração de outros usuários (se necessário)
-        const q = query(collection(db, "users"), where("email", "==", email));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-            const userData = querySnapshot.docs[0].data() as User;
-            await setDoc(doc(db, "users", uid), { ...userData, id: uid });
-            return { ...userData, id: uid };
-        }
         
-        throw new Error("Usuário autenticado, mas perfil não encontrado no banco de dados.");
+        throw new Error("Usuário autenticado, mas perfil não encontrado.");
       }
     } catch (error: any) {
       console.error("Login error:", error);
@@ -114,8 +84,6 @@ export const dataService = {
     }
   },
 
-  // --- SESSION & USER MANAGEMENT ---
-
   getUserById: async (id: string): Promise<User | null> => {
     try {
       const docRef = doc(db, "users", id);
@@ -130,16 +98,12 @@ export const dataService = {
     }
   },
 
-  // --- STATISTICS ---
-
   getUserStats: async (userId: string) => {
     try {
-      // Challenges Created
       const qChallenges = query(collection(db, "challenges"), where("authorId", "==", userId));
       const snapChallenges = await getDocs(qChallenges);
       const challengesCreated = snapChallenges.size;
 
-      // Meetings Attended
       const meetingsSnap = await getDocs(collection(db, "meetings"));
       let totalMeetings = 0;
       let attended = 0;
@@ -152,8 +116,6 @@ export const dataService = {
       });
       const attendanceRate = totalMeetings > 0 ? Math.round((attended / totalMeetings) * 100) : 0;
 
-      // Contributions (REAL CALCULATION)
-      // Iterate through all challenges to count user's contributions
       const allChallengesSnap = await getDocs(collection(db, "challenges"));
       let contributions = 0;
       allChallengesSnap.forEach(doc => {
@@ -165,7 +127,6 @@ export const dataService = {
 
       return { challenges: challengesCreated, contributions, attendance: attendanceRate };
     } catch (error) {
-      console.error(error);
       return { challenges: 0, contributions: 0, attendance: 0 };
     }
   },
@@ -183,11 +144,6 @@ export const dataService = {
         const meetings = meetingsSnap.docs.map(d => d.data() as Meeting);
 
         const leaderboard = users.map(u => {
-            // Logic:
-            // Meeting confirmed: 100 pts
-            // Challenge Created: 50 pts
-            // Contribution: 30 pts
-
             const myMeetings = meetings.filter(m => m.termAcceptedBy?.includes(u.id)).length;
             const myChallenges = challenges.filter(c => c.authorId === u.id).length;
             let myContributions = 0;
@@ -207,21 +163,18 @@ export const dataService = {
             };
         });
 
-        // Return sorted by points desc
         return leaderboard.sort((a, b) => b.points - a.points);
     } catch (e) {
-        console.error("Error fetching leaderboard", e);
         return [];
     }
   },
 
   getActiveMemberCount: async () => {
+    // Conta apenas quem já é membro oficial ATIVO
     const q = query(collection(db, "users"), where("status", "==", UserStatus.ACTIVE));
     const snap = await getDocs(q);
     return snap.size;
   },
-
-  // --- CRUD: USERS ---
 
   getAllUsers: async (): Promise<User[]> => {
     const snap = await getDocs(collection(db, "users"));
@@ -238,8 +191,6 @@ export const dataService = {
     await deleteDoc(doc(db, "users", userId));
   },
 
-  // --- CRUD: CHALLENGES ---
-
   getChallenges: async (): Promise<Challenge[]> => {
     const q = query(collection(db, "challenges"), orderBy("createdAt", "desc"));
     const snap = await getDocs(q);
@@ -249,10 +200,10 @@ export const dataService = {
         return { 
           id: doc.id, 
           ...data,
-          contributions: data.contributions || [] // Ensure it's never undefined
+          contributions: data.contributions || []
         } as Challenge;
       })
-      .filter(c => c.status !== 'DELETED'); // Filter out soft-deleted items
+      .filter(c => c.status !== 'DELETED');
   },
 
   createChallenge: async (content: string, user: User): Promise<Challenge> => {
@@ -296,7 +247,7 @@ export const dataService = {
       
       const newContribution: Contribution = {
         id: Math.random().toString(36).substr(2, 9),
-        challengeId: challengeId, // Fix: Use parameter directly to avoid undefined from data()
+        challengeId: challengeId,
         authorId: user.id,
         authorName: user.name,
         content: content,
@@ -317,8 +268,6 @@ export const dataService = {
 
     return type;
   },
-
-  // --- CRUD: MEETINGS ---
 
   getMeetings: async (): Promise<Meeting[]> => {
     const snap = await getDocs(collection(db, "meetings"));
@@ -354,8 +303,6 @@ export const dataService = {
       }
     }
   },
-
-  // --- CRUD: CANDIDATES ---
 
   getCandidates: async (): Promise<Candidate[]> => {
     const snap = await getDocs(collection(db, "candidates"));
@@ -396,14 +343,14 @@ export const dataService = {
 
     await updateDoc(ref, { votes });
 
-    // Check Promotion Logic
+    // Pega contagem de membros ativos (candidato não conta aqui)
     const activeMembers = await dataService.getActiveMemberCount();
     const approvalVotes = Object.values(votes).filter(v => v === 'APPROVE').length;
     
     if (activeMembers > 0) {
       const approvalRate = approvalVotes / activeMembers;
-      if (approvalRate >= 0.8) {
-        // Promote to User
+      // Regra de Aprovação: 60%
+      if (approvalRate >= 0.6) {
         const newUser: Partial<User> = {
           name: candidate.name,
           email: candidate.email,
@@ -417,64 +364,14 @@ export const dataService = {
         };
         
         await addDoc(collection(db, "users"), newUser);
-        await deleteDoc(ref); // Remove from candidates
+        await deleteDoc(ref);
         return true;
       }
     }
     return false;
   },
 
-  // --- SEEDING / SETUP ---
-  
   initializeDB: async () => {
-    console.group("INITIALIZE DB - START");
-    try {
-      // 1. Seed Dummy Users
-      for (const u of DEFAULT_USERS_SEED) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", u.id));
-          if (!userDoc.exists()) {
-             const { password, ...uData } = u as any;
-             await setDoc(doc(db, "users", u.id), uData);
-             console.log(`[SEED] User ${u.name} criado com sucesso.`);
-          }
-        } catch (e) {
-          console.error(`[SEED ERROR] Falha ao criar user ${u.name}:`, e);
-          throw e; // Propagate error specifically to trigger AuthContext error handling
-        }
-      }
-
-      // 2. Seed Challenges
-      try {
-        const challengesSnap = await getDocs(collection(db, "challenges"));
-        if (challengesSnap.empty) {
-          for (const c of DEFAULT_CHALLENGES) {
-            await addDoc(collection(db, "challenges"), c);
-          }
-          console.log("[SEED] Desafios iniciais criados.");
-        }
-      } catch (e) {
-         console.error("[SEED ERROR] Falha ao criar desafios:", e);
-      }
-
-      // 3. Seed Meetings
-      try {
-        const meetingsSnap = await getDocs(collection(db, "meetings"));
-        if (meetingsSnap.empty) {
-          for (const m of DEFAULT_MEETINGS) {
-            await addDoc(collection(db, "meetings"), m);
-          }
-          console.log("[SEED] Reuniões iniciais criadas.");
-        }
-      } catch (e) {
-         console.error("[SEED ERROR] Falha ao criar reuniões:", e);
-      }
-
-    } catch (criticalError) {
-      console.error("[INITIALIZE DB] Erro crítico:", criticalError);
-      throw criticalError;
-    } finally {
-      console.groupEnd();
-    }
+    console.log("[INIT] Banco de dados pronto para uso.");
   }
 };

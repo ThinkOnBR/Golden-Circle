@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Candidate, UserRole } from '../types';
@@ -92,7 +93,7 @@ export const Members: React.FC = () => {
               <div className="mb-4">
                 <div className="flex justify-between text-xs text-zinc-500 mb-1">
                   <span>Aprovação ({votesFor}/{activeCount} ativos)</span>
-                  <span>{approvalRate}% (Meta: 80%)</span>
+                  <span>{approvalRate}% (Meta: 60%)</span>
                 </div>
                 <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
                   <div className="bg-gold-500 h-full transition-all duration-500" style={{ width: `${approvalRate}%` }}></div>

@@ -58,11 +58,14 @@ export const Login: React.FC = () => {
           </p>
         </div>
         
-        <div className="space-y-4" onKeyDown={handleKeyDown}>
+        <form className="space-y-4" onKeyDown={handleKeyDown} onSubmit={(e) => e.preventDefault()}>
           <div>
             <Input 
+              id="email"
+              name="email"
               placeholder="E-mail Corporativo" 
               type="email" 
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -71,7 +74,10 @@ export const Login: React.FC = () => {
           {!recoverMode && (
             <div>
               <PasswordInput 
+                id="password"
+                name="password"
                 placeholder="Senha" 
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -93,13 +99,14 @@ export const Login: React.FC = () => {
                Enviar Link de Redefinição
              </Button>
           ) : (
-            <Button className="w-full" onClick={handleLogin} disabled={loading}>
+            <Button className="w-full" onClick={handleLogin} disabled={loading} type="submit">
               {loading ? 'Conectando...' : 'Entrar'}
             </Button>
           )}
 
           <div className="text-center pt-2">
             <button 
+              type="button"
               onClick={() => {
                 setRecoverMode(!recoverMode);
                 clearError();
@@ -109,7 +116,7 @@ export const Login: React.FC = () => {
               {recoverMode ? 'Voltar para Login' : 'Esqueci minha senha / Primeiro acesso'}
             </button>
           </div>
-        </div>
+        </form>
         
         <div className="mt-8 pt-4 border-t border-zinc-800 text-center text-[10px] text-zinc-700">
            &copy; {new Date().getFullYear()} Capital Golden Circle. Todos os direitos reservados.

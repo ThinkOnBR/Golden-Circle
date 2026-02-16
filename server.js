@@ -1,190 +1,163 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, URL } from 'url';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT) || 8080;
-const BUILD_PATH = path.join(__dirname, 'build');
+const BUILD_PATH = path.join(__dirname, 'dist');
+const PUBLIC_PATH = path.join(__dirname, 'public');
 
-// Estado da aplicação
-let appStatus = 'INITIALIZING'; // INITIALIZING, BUILDING, READY, ERROR
+let appStatus = 'INITIALIZING'; 
 let buildLogs = [];
 
-// Tipos MIME
 const MIME_TYPES = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
-  '.xml': 'application/xml',
-  '.txt': 'text/plain'
+  '.xml': 'application/xml; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8'
 };
 
 const runCommand = (command, args) => {
   return new Promise((resolve, reject) => {
     const process = spawn(command, args, { stdio: 'pipe', shell: true });
-    
     process.stdout.on('data', (data) => {
       const msg = data.toString().trim();
-      if (msg) {
-        console.log(`[BUILD] ${msg}`);
-        buildLogs.push(msg);
-        if (buildLogs.length > 50) buildLogs.shift();
-      }
+      if (msg) buildLogs.push(msg);
     });
-
-    process.stderr.on('data', (data) => {
-      const msg = data.toString().trim();
-      if (msg) console.error(`[BUILD STDERR] ${msg}`);
-    });
-
-    process.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Comando '${command}' falhou com código ${code}`));
-    });
+    process.on('close', (code) => code === 0 ? resolve() : reject(new Error('Command failed')));
   });
 };
 
 const startBuildProcess = async () => {
-  if (appStatus === 'BUILDING' || appStatus === 'READY') return;
-  
+  if (appStatus === 'BUILDING') return;
   try {
     appStatus = 'BUILDING';
-    buildLogs.push('Iniciando processo de build...');
-    
-    // 1. NPM INSTALL
-    buildLogs.push('Instalando dependências...');
     await runCommand('npm', ['install', '--no-package-lock', '--loglevel=error']);
-    
-    // 2. NPM RUN BUILD
-    buildLogs.push('Compilando aplicação (Vite)...');
     await runCommand('npm', ['run', 'build']);
-    
-    if (fs.existsSync(path.join(BUILD_PATH, 'index.html'))) {
-      appStatus = 'READY';
-      buildLogs.push('Build concluído com sucesso!');
-      console.log('[Server] Aplicação pronta para uso.');
-    } else {
-      throw new Error('Pasta build criada, mas index.html não encontrado.');
-    }
+    appStatus = 'READY';
   } catch (error) {
-    console.error('[FATAL] Erro no processo de build:', error);
     appStatus = 'ERROR';
-    buildLogs.push(`ERRO CRÍTICO: ${error.message}`);
   }
 };
 
 const server = http.createServer((req, res) => {
-  // Health Check
   if (req.url === '/health') {
-    res.writeHead(200);
-    res.end('OK');
-    return;
+    res.writeHead(200); res.end('OK'); return;
   }
 
-  // APP READY
+  // Blinda contra requisições diretas ao código fonte no mobile
+  if (req.url.endsWith('.tsx')) {
+    res.writeHead(404); res.end('Not Found'); return;
+  }
+
   if (appStatus === 'READY') {
-    // 1. CORREÇÃO MOBILE: Sanitizar URL
-    // Remove query params (ex: ?fbclid=...) que causam erro 403 ao tentar buscar arquivo com nome sujo
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers.host || 'localhost';
-    const parsedUrl = new URL(req.url, `${protocol}://${host}`);
-    let pathname = parsedUrl.pathname;
-
-    // Normaliza caminho para evitar Directory Traversal
-    const safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    let cleanUrl = req.url.split('?')[0];
+    const safePath = path.normalize(cleanUrl).replace(/^(\.\.[\/\\])+/, '');
     
-    // Determina o arquivo físico
-    let filePath = path.join(BUILD_PATH, safePath === '/' ? 'index.html' : safePath);
+    // Especial para manifest e assets raiz
+    const isRootAsset = ['manifest.json', 'favicon.ico', 'service-worker.js'].includes(safePath.replace(/^\//, ''));
+    const isIconRequest = safePath.includes('icons/') || safePath.includes('favicon');
 
-    // Lógica de SPA (Single Page Application)
-    // Se o arquivo solicitado NÃO existe no disco...
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-        // Se tem extensão (ex: style.css, logo.png), é um arquivo faltando -> 404
-        if (path.extname(filePath)) {
-            res.writeHead(404);
-            res.end('File not found');
-            return;
-        }
-        // Se não tem extensão (ex: /dashboard, /login), é uma rota do App -> serve index.html
-        filePath = path.join(BUILD_PATH, 'index.html');
+    let filePath = path.join(BUILD_PATH, safePath === '/' ? 'index.html' : safePath);
+    
+    // Se for um ícone, tenta a pasta public primeiro para ser mais resiliente
+    if (isIconRequest) {
+      const pPath = path.join(PUBLIC_PATH, safePath);
+      if (fs.existsSync(pPath) && !fs.statSync(pPath).isDirectory()) {
+        filePath = pPath;
+      }
     }
 
-    const extname = path.extname(filePath);
-    const contentType = MIME_TYPES[extname] || 'application/octet-stream';
+    // Lógica de busca resiliente (Build -> Public -> Root)
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      const pPath = path.join(PUBLIC_PATH, safePath);
+      const rPath = path.join(__dirname, safePath);
+      
+      if (fs.existsSync(pPath) && !fs.statSync(pPath).isDirectory()) {
+        filePath = pPath;
+      } else if (fs.existsSync(rPath) && !fs.statSync(rPath).isDirectory()) {
+        filePath = rPath;
+      } else if (!path.extname(safePath)) {
+        filePath = path.join(BUILD_PATH, 'index.html');
+      } else {
+        res.writeHead(404); res.end('Not Found'); return;
+      }
+    }
+
+    const extname = path.extname(filePath).toLowerCase();
+    let contentType = MIME_TYPES[extname] || 'application/octet-stream';
+    
+    // Forçar MIME do manifest para evitar 403 no mobile
+    if (safePath.includes('manifest.json')) {
+      contentType = 'application/manifest+json; charset=utf-8';
+    }
 
     fs.readFile(filePath, (error, content) => {
       if (error) {
-        res.writeHead(500);
-        res.end('Server Error: ' + error.code);
+        res.writeHead(500); res.end('Internal Server Error');
       } else {
-        // Injeção de API Key apenas no HTML
         if (extname === '.html') {
+          let html = content.toString('utf8').trimStart();
+          
+          const assetsDir = path.join(BUILD_PATH, 'assets');
+          if (fs.existsSync(assetsDir)) {
+            const files = fs.readdirSync(assetsDir);
+            const mainJs = files.find(f => f.startsWith('index-') && f.endsWith('.js'));
+            const mainCss = files.find(f => f.startsWith('index-') && f.endsWith('.css'));
+            
+            if (mainJs) {
+              html = html.replace(/<script.*src=["'].*index\.tsx["'].*><\/script>/, `<script type="module" src="/assets/${mainJs}"></script>`);
+              html = html.replace(/src=["']index\.tsx["']/, `src="/assets/${mainJs}"`);
+            }
+            if (mainCss) {
+              if (!html.includes(mainCss)) {
+                html = html.replace('</head>', `<link rel="stylesheet" href="/assets/${mainCss}"></head>`);
+              }
+            }
+          }
+
           const apiKey = process.env.API_KEY || '';
-          let html = content.toString('utf8');
-          // Substituição segura
           html = html.replace(/window\.env\s*=\s*\{\s*API_KEY:\s*""\s*\};/, `window.env = { API_KEY: "${apiKey}" };`);
           content = Buffer.from(html, 'utf8');
         }
         
-        // Cache control para assets estáticos vs HTML
-        const cacheControl = extname === '.html' ? 'no-cache' : 'public, max-age=31536000';
-        
-        res.writeHead(200, { 
-            'Content-Type': contentType,
-            'Cache-Control': cacheControl
-        });
-        res.end(content, 'utf-8');
+        const headers = {
+          'Content-Type': contentType,
+          'X-Content-Type-Options': 'nosniff',
+          'Access-Control-Allow-Origin': '*'
+        };
+
+        if (extname === '.html' || isRootAsset) {
+          headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0';
+        } else {
+          headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+        }
+            
+        res.writeHead(200, headers);
+        res.end(content);
       }
     });
     return;
   }
 
-  // TELA DE LOADING
-  if (appStatus === 'BUILDING' || appStatus === 'INITIALIZING') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`
-      <!DOCTYPE html>
-      <html style="background:#050505;color:#e5e5e5;font-family:sans-serif;">
-      <head><meta http-equiv="refresh" content="3"><title>Carregando...</title></head>
-      <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;">
-        <div style="border:1px solid #ca8a04;padding:2rem;border-radius:10px;background:#111;text-align:center;">
-          <h1 style="color:#eab308;">Iniciando Sistema</h1>
-          <p>Configurando ambiente seguro...</p>
-          <div style="margin:20px 0;width:200px;background:#222;height:4px;border-radius:2px;overflow:hidden;">
-            <div style="width:100%;height:100%;background:#eab308;animation:p 2s infinite;"></div>
-          </div>
-          <pre style="text-align:left;font-size:10px;color:#666;">${buildLogs[buildLogs.length-1] || 'Aguardando...'}</pre>
-        </div>
-        <style>@keyframes p { 0% {transform:translateX(-100%)} 100% {transform:translateX(100%)} }</style>
-      </body>
-      </html>
-    `);
-    return;
-  }
-
-  // TELA DE ERRO
-  if (appStatus === 'ERROR') {
-    res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(`<h1>Erro Fatal</h1><pre>${buildLogs.join('\n')}</pre>`);
-  }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end('<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Iniciando Confraria...</h1><script>setTimeout(()=>location.reload(), 2000)</script></body></html>');
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Server] Rodando na porta ${PORT}`);
-  if (fs.existsSync(path.join(BUILD_PATH, 'index.html'))) {
-    appStatus = 'READY';
-  } else {
-    setTimeout(startBuildProcess, 1000);
-  }
+  console.log(`Server running on port ${PORT}`);
+  setTimeout(startBuildProcess, 1000);
 });
