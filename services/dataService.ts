@@ -326,15 +326,16 @@ export const dataService = {
     await addDoc(collection(db, "candidates"), newCandidate);
   },
 
-  voteCandidate: async (candidateId: string, userId: string, type: 'APPROVE' | 'VETO'): Promise<boolean> => {
+  voteCandidate: async (candidateId: string, userId: string, type: 'APPROVE' | 'VETO'): Promise<{ success: boolean; tempPassword?: string; error?: string }> => {
     const ref = doc(db, "candidates", candidateId);
     const snap = await getDoc(ref);
     
-    if (!snap.exists()) return false;
+    if (!snap.exists()) return { success: false, error: "Candidato não encontrado" };
     
     const candidate = snap.data() as Candidate;
     const votes = candidate.votes || {};
 
+    // Toggle vote logic
     if (votes[userId] === type) {
       delete votes[userId];
     } else {
@@ -343,32 +344,67 @@ export const dataService = {
 
     await updateDoc(ref, { votes });
 
-    // Pega contagem de membros ativos (candidato não conta aqui)
+    // --- LOGIC: Check Approval ---
     const activeMembers = await dataService.getActiveMemberCount();
     const approvalVotes = Object.values(votes).filter(v => v === 'APPROVE').length;
     
+    // Regra: Se tiver membros ativos e atingir 60%
     if (activeMembers > 0) {
       const approvalRate = approvalVotes / activeMembers;
-      // Regra de Aprovação: 60%
+      
       if (approvalRate >= 0.6) {
-        const newUser: Partial<User> = {
-          name: candidate.name,
-          email: candidate.email,
-          phone: candidate.phone,
-          company: candidate.company,
-          companies: candidate.companies,
-          role: UserRole.PARTICIPANT,
-          status: UserStatus.ACTIVE,
-          bio: candidate.bio,
-          revenue: candidate.revenueRange
-        };
-        
-        await addDoc(collection(db, "users"), newUser);
-        await deleteDoc(ref);
-        return true;
+        // --- UPGRADE: Server-Side User Creation ---
+        try {
+          const idToken = await auth.currentUser?.getIdToken();
+          
+          if (!idToken) throw new Error("Usuário não autenticado para realizar promoção");
+
+          // Chama a API do servidor (que usa Admin SDK)
+          const response = await fetch('/api/admin/promote', {
+             method: 'POST',
+             headers: {
+               'Content-Type': 'application/json'
+             },
+             body: JSON.stringify({
+               idToken,
+               email: candidate.email,
+               name: candidate.name
+             })
+          });
+
+          if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || "Erro no servidor ao criar usuário");
+          }
+
+          const { uid, tempPassword } = await response.json();
+
+          // Cria perfil no Firestore usando o UID real do Auth
+          const newUser: User = {
+            id: uid, // Importante: Mesmo ID do Auth
+            name: candidate.name,
+            email: candidate.email,
+            phone: candidate.phone,
+            company: candidate.company,
+            companies: candidate.companies,
+            role: UserRole.PARTICIPANT,
+            status: UserStatus.ACTIVE,
+            bio: candidate.bio,
+            revenue: candidate.revenueRange
+          };
+          
+          await setDoc(doc(db, "users", uid), newUser);
+          await deleteDoc(ref);
+
+          return { success: true, tempPassword };
+
+        } catch (serverError: any) {
+          console.error("Server creation failed:", serverError);
+          return { success: false, error: "Aprovado, mas falha ao criar login: " + serverError.message };
+        }
       }
     }
-    return false;
+    return { success: false };
   },
 
   initializeDB: async () => {

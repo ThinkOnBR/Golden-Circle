@@ -13,6 +13,10 @@ export const Members: React.FC = () => {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // State for showing credentials after approval
+  const [newMemberCreds, setNewMemberCreds] = useState<{name: string, email: string, password: string} | null>(null);
+
   const [formData, setFormData] = useState<{name:string, email:string, phone:string, companies:string[], bio:string, revenueRange:string}>({
     name: '', email: '', phone: '', companies: [''], bio: '', revenueRange: ''
   });
@@ -29,12 +33,32 @@ export const Members: React.FC = () => {
   }, []);
 
   const handleVote = async (id: string, type: 'APPROVE' | 'VETO') => {
-    const promoted = await dataService.voteCandidate(id, user.id, type);
-    refreshData();
-    if (promoted) {
-      addToast('Candidato aprovado e promovido a membro oficial!', 'success');
-    } else {
-      addToast('Seu voto foi registrado.', 'info');
+    try {
+      const result = await dataService.voteCandidate(id, user.id, type);
+      refreshData();
+      
+      if (result.success && result.tempPassword) {
+        // Encontra o candidato (que acabou de ser deletado, então pegamos do state anterior ou da resposta se tivesse)
+        const candidateName = candidates.find(c => c.id === id)?.name || "Novo Membro";
+        const candidateEmail = candidates.find(c => c.id === id)?.email || "";
+
+        setNewMemberCreds({
+            name: candidateName,
+            email: candidateEmail,
+            password: result.tempPassword
+        });
+
+        addToast('Candidato APROVADO! Conta de acesso criada.', 'success');
+      } else if (result.success && !result.tempPassword) {
+          // Caso raro de aprovação sem servidor (fallback antigo ou erro parcial)
+          addToast('Candidato aprovado no banco de dados.', 'info');
+      } else if (result.error) {
+          addToast(result.error, 'error');
+      } else {
+        addToast('Seu voto foi registrado.', 'info');
+      }
+    } catch (e: any) {
+        addToast("Erro ao votar: " + e.message, 'error');
     }
   };
 
@@ -148,6 +172,39 @@ export const Members: React.FC = () => {
                <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
                <Button onClick={handleIndicate}>Submeter para Votação</Button>
             </div>
+         </div>
+      </Modal>
+
+      {/* MODAL DE CREDENCIAIS (SÓ APARECE APÓS APROVAÇÃO BEM SUCEDIDA) */}
+      <Modal isOpen={!!newMemberCreds} onClose={() => setNewMemberCreds(null)} title="Novo Membro Cadastrado!">
+         <div className="space-y-6 text-center">
+            <div className="w-16 h-16 rounded-full bg-green-500/20 text-green-500 flex items-center justify-center mx-auto border border-green-500/50">
+                <Icons.Check className="w-8 h-8" />
+            </div>
+            <div>
+               <h3 className="text-white font-bold text-lg mb-1">{newMemberCreds?.name}</h3>
+               <p className="text-zinc-400 text-sm">O acesso foi criado com sucesso.</p>
+            </div>
+            
+            <div className="bg-zinc-900 p-4 rounded border border-zinc-700 text-left">
+               <p className="text-xs text-zinc-500 uppercase font-bold mb-2">Envie estas credenciais:</p>
+               <div className="space-y-2 font-mono text-sm">
+                   <div className="flex justify-between">
+                       <span className="text-zinc-400">Login:</span>
+                       <span className="text-white select-all">{newMemberCreds?.email}</span>
+                   </div>
+                   <div className="flex justify-between">
+                       <span className="text-zinc-400">Senha Temp:</span>
+                       <span className="text-gold-500 font-bold select-all">{newMemberCreds?.password}</span>
+                   </div>
+               </div>
+            </div>
+            
+            <p className="text-[10px] text-zinc-500 italic">
+               O membro poderá alterar esta senha no primeiro acesso através da opção "Esqueci minha senha" ou no perfil.
+            </p>
+
+            <Button onClick={() => setNewMemberCreds(null)} className="w-full">Entendido</Button>
          </div>
       </Modal>
     </div>

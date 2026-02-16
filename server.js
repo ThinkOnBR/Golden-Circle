@@ -1,41 +1,57 @@
-import http from 'http';
-import fs from 'fs';
+
+import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const app = express();
 const PORT = parseInt(process.env.PORT) || 8080;
 const BUILD_PATH = path.join(__dirname, 'dist');
-const PUBLIC_PATH = path.join(__dirname, 'public');
 
-let appStatus = 'INITIALIZING'; 
-let buildLogs = [];
+// --- FIREBASE ADMIN SETUP ---
+let adminApp = null;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    if (getApps().length === 0) {
+      adminApp = initializeApp({
+        credential: cert(serviceAccount)
+      });
+      console.log('Firebase Admin SDK initialized successfully.');
+    } else {
+      adminApp = getApps()[0];
+    }
+  } else {
+    console.warn('WARNING: FIREBASE_SERVICE_ACCOUNT env var not found. Admin features (create user) will fail.');
+  }
+} catch (error) {
+  console.error('Failed to initialize Firebase Admin:', error);
+}
 
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.webmanifest': 'application/manifest+json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.xml': 'application/xml; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8'
-};
+// Middleware
+app.use(express.json());
+
+// --- BUILD PROCESS ---
+let appStatus = 'INITIALIZING';
+const buildLogs = [];
 
 const runCommand = (command, args) => {
   return new Promise((resolve, reject) => {
     const process = spawn(command, args, { stdio: 'pipe', shell: true });
     process.stdout.on('data', (data) => {
       const msg = data.toString().trim();
-      if (msg) buildLogs.push(msg);
+      if (msg) {
+        // console.log(msg); // Optional: keep logs clean
+        buildLogs.push(msg);
+      }
+    });
+    process.stderr.on('data', (data) => {
+      console.error(data.toString());
     });
     process.on('close', (code) => code === 0 ? resolve() : reject(new Error('Command failed')));
   });
@@ -45,119 +61,98 @@ const startBuildProcess = async () => {
   if (appStatus === 'BUILDING') return;
   try {
     appStatus = 'BUILDING';
+    console.log('Starting build process...');
     await runCommand('npm', ['install', '--no-package-lock', '--loglevel=error']);
     await runCommand('npm', ['run', 'build']);
     appStatus = 'READY';
+    console.log('Build complete. App is ready.');
   } catch (error) {
+    console.error('Build failed:', error);
     appStatus = 'ERROR';
   }
 };
 
-const server = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200); res.end('OK'); return;
+// --- API ROUTES ---
+
+// Endpoint para promover candidato (Criar Usuário no Auth + Retornar UID)
+app.post('/api/admin/promote', async (req, res) => {
+  if (!adminApp) {
+    return res.status(500).json({ error: 'Servidor não configurado com Chave de Serviço (Admin SDK).' });
   }
 
-  // Blinda contra requisições diretas ao código fonte no mobile
-  if (req.url.endsWith('.tsx')) {
-    res.writeHead(404); res.end('Not Found'); return;
-  }
+  const { idToken, email, name } = req.body;
 
-  if (appStatus === 'READY') {
-    let cleanUrl = req.url.split('?')[0];
-    const safePath = path.normalize(cleanUrl).replace(/^(\.\.[\/\\])+/, '');
-    
-    // Especial para manifest e assets raiz
-    const isRootAsset = ['manifest.json', 'favicon.ico', 'service-worker.js'].includes(safePath.replace(/^\//, ''));
-    const isIconRequest = safePath.includes('icons/') || safePath.includes('favicon');
+  try {
+    // 1. Verificar se quem está pedindo é um usuário válido (Segurança Básica)
+    await getAuth().verifyIdToken(idToken);
 
-    let filePath = path.join(BUILD_PATH, safePath === '/' ? 'index.html' : safePath);
-    
-    // Se for um ícone, tenta a pasta public primeiro para ser mais resiliente
-    if (isIconRequest) {
-      const pPath = path.join(PUBLIC_PATH, safePath);
-      if (fs.existsSync(pPath) && !fs.statSync(pPath).isDirectory()) {
-        filePath = pPath;
-      }
-    }
+    // 2. Gerar senha temporária
+    const tempPassword = Math.random().toString(36).slice(-8) + "Aa1!";
 
-    // Lógica de busca resiliente (Build -> Public -> Root)
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-      const pPath = path.join(PUBLIC_PATH, safePath);
-      const rPath = path.join(__dirname, safePath);
-      
-      if (fs.existsSync(pPath) && !fs.statSync(pPath).isDirectory()) {
-        filePath = pPath;
-      } else if (fs.existsSync(rPath) && !fs.statSync(rPath).isDirectory()) {
-        filePath = rPath;
-      } else if (!path.extname(safePath)) {
-        filePath = path.join(BUILD_PATH, 'index.html');
-      } else {
-        res.writeHead(404); res.end('Not Found'); return;
-      }
-    }
-
-    const extname = path.extname(filePath).toLowerCase();
-    let contentType = MIME_TYPES[extname] || 'application/octet-stream';
-    
-    // Forçar MIME do manifest para evitar 403 no mobile
-    if (safePath.includes('manifest.json')) {
-      contentType = 'application/manifest+json; charset=utf-8';
-    }
-
-    fs.readFile(filePath, (error, content) => {
-      if (error) {
-        res.writeHead(500); res.end('Internal Server Error');
-      } else {
-        if (extname === '.html') {
-          let html = content.toString('utf8').trimStart();
-          
-          const assetsDir = path.join(BUILD_PATH, 'assets');
-          if (fs.existsSync(assetsDir)) {
-            const files = fs.readdirSync(assetsDir);
-            const mainJs = files.find(f => f.startsWith('index-') && f.endsWith('.js'));
-            const mainCss = files.find(f => f.startsWith('index-') && f.endsWith('.css'));
-            
-            if (mainJs) {
-              html = html.replace(/<script.*src=["'].*index\.tsx["'].*><\/script>/, `<script type="module" src="/assets/${mainJs}"></script>`);
-              html = html.replace(/src=["']index\.tsx["']/, `src="/assets/${mainJs}"`);
-            }
-            if (mainCss) {
-              if (!html.includes(mainCss)) {
-                html = html.replace('</head>', `<link rel="stylesheet" href="/assets/${mainCss}"></head>`);
-              }
-            }
-          }
-
-          const apiKey = process.env.API_KEY || '';
-          html = html.replace(/window\.env\s*=\s*\{\s*API_KEY:\s*""\s*\};/, `window.env = { API_KEY: "${apiKey}" };`);
-          content = Buffer.from(html, 'utf8');
-        }
-        
-        const headers = {
-          'Content-Type': contentType,
-          'X-Content-Type-Options': 'nosniff',
-          'Access-Control-Allow-Origin': '*'
-        };
-
-        if (extname === '.html' || isRootAsset) {
-          headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0';
-        } else {
-          headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-        }
-            
-        res.writeHead(200, headers);
-        res.end(content);
-      }
+    // 3. Criar usuário no Firebase Auth
+    const userRecord = await getAuth().createUser({
+      email: email,
+      emailVerified: true, // Já aprovado pela comissão, então validamos
+      password: tempPassword,
+      displayName: name,
+      disabled: false,
     });
-    return;
-  }
 
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end('<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Iniciando Confraria...</h1><script>setTimeout(()=>location.reload(), 2000)</script></body></html>');
+    console.log(`Successfully created new user: ${userRecord.uid}`);
+
+    // 4. Retornar dados para o frontend finalizar o cadastro no Firestore
+    res.json({ 
+      uid: userRecord.uid,
+      tempPassword: tempPassword
+    });
+
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: error.message || 'Erro ao criar usuário.' });
+  }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// --- STATIC FILES SERVING ---
+
+// Middleware to intercept serving logic based on app status
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api')) return next(); // API passes through
+
+  if (appStatus !== 'READY') {
+    res.type('html');
+    return res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta http-equiv="refresh" content="3"></head><body style="background:#000;color:#e5e5e5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;"><div><h1>Iniciando Sistema...</h1><p>Status: ${appStatus}</p><p>Aguarde, a página recarregará automaticamente.</p></div></body></html>`);
+  }
+  next();
+});
+
+// Serve static assets with correct caching
+app.use(express.static(BUILD_PATH, {
+  maxAge: '1y',
+  setHeaders: (res, path) => {
+    if (path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
+
+// Fallback for SPA (React Router)
+app.get('*', (req, res) => {
+  if (req.url.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
+  
+  const indexHtml = path.join(BUILD_PATH, 'index.html');
+  res.sendFile(indexHtml, (err) => {
+      if (err) {
+        res.status(500).send("Error loading application.");
+      }
+  });
+});
+
+// Start Server
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   setTimeout(startBuildProcess, 1000);
 });
